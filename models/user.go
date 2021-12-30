@@ -1,7 +1,6 @@
 package models
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -23,7 +22,7 @@ func GetUsers() []*User {
 func AddUser(u User) (User, error) {
 
 	if u.Id != 0 {
-		return User{}, errors.New("New User must not include ID or it must be of value 0")
+		return User{}, fmt.Errorf("new User must not include ID or it must be of value 0")
 	}
 
 	u.Id = nextId
