@@ -1,19 +1,25 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ezrod12/go-web-server/models"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type userController struct {
 	userIdPattern *regexp.Regexp
+	context       context.Context
+	collection    *mongo.Collection
 }
 
 func (uc userController) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -31,10 +37,8 @@ func (uc userController) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(matches) == 0 {
 			w.WriteHeader(http.StatusNotFound)
 		}
-		id, err := strconv.Atoi(matches[1])
-		if err != nil {
-			w.WriteHeader(http.StatusNotFound)
-		}
+		id := matches[1]
+
 		fmt.Println(id)
 
 		switch r.Method {
@@ -51,17 +55,32 @@ func (uc userController) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func newUserController() *userController {
+	/*
+	   Connect to my cluster
+	*/
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	err = client.Connect(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	collection := client.Database("library").Collection("users")
+
 	return &userController{
-		userIdPattern: regexp.MustCompile(`^/users/(\d+)/?`),
+		userIdPattern: regexp.MustCompile(`/users/([A-Za-z0-9\-]+)/?`),
+		collection:    collection,
 	}
 }
 
 func (uc *userController) getAll(w http.ResponseWriter, r *http.Request) {
-	encodeResponseAsJson(models.GetUsers(), w)
+	encodeResponseAsJson(models.GetUsers(uc.collection, uc.context), w)
 }
 
-func (uc *userController) get(id int, w http.ResponseWriter) {
-	u, err := models.GetUserById(id)
+func (uc *userController) get(id string, w http.ResponseWriter) {
+	u, err := models.GetUserById(id, uc.collection, uc.context)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		return
@@ -85,7 +104,7 @@ func (uc *userController) post(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err = models.AddUser(u)
+	u, err = models.AddUser(u, uc.collection, uc.context)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -94,7 +113,7 @@ func (uc *userController) post(w http.ResponseWriter, r *http.Request) {
 	encodeResponseAsJson(u, w)
 }
 
-func (uc *userController) put(id int, w http.ResponseWriter, r *http.Request) {
+func (uc *userController) put(id string, w http.ResponseWriter, r *http.Request) {
 	u, err := uc.parseRequest(r)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -121,7 +140,7 @@ func (uc *userController) put(id int, w http.ResponseWriter, r *http.Request) {
 	encodeResponseAsJson(u, w)
 }
 
-func (uc *userController) delete(id int, w http.ResponseWriter) {
+func (uc *userController) delete(id string, w http.ResponseWriter) {
 	err := models.RemoveUser(id)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
